@@ -8,9 +8,10 @@ automatically
 """
 import time
 from os import makedirs
+from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup as BS
+from bs4 import BeautifulSoup
 from fpdf import FPDF
 from PIL import Image
 
@@ -43,7 +44,7 @@ def main():
     """
     lines = []
     try:
-        with open("links.txt", "r", encoding="utf-8") as file:
+        with open("links.txt", encoding="utf-8") as file:
             makedirs("pdfs", exist_ok=True)
             lines = file.readlines()
     except FileNotFoundError:
@@ -93,12 +94,11 @@ def make_status_string(
     as the two measures that are actually used for the creation of the progress
     bar (current_progress & max_progress).
     """
-    res = (
+    return (
         title.ljust(40)
         + current_status.value.center(STATUS_LEN)
         + make_progress_bar(current_progress, max_progress, step_num)
     )
-    return res
 
 
 def handle_entry(url: str, name: str) -> None:
@@ -117,14 +117,24 @@ def handle_entry(url: str, name: str) -> None:
     url = url.strip()
     name = name.strip()
     clean_name = name.replace(" ", "_")
-    makedirs(f"imgs/{clean_name}", exist_ok=True)
-    base = requests.get(url, timeout=3)
+    Path(f"imgs/{clean_name}").mkdir( exist_ok=True)
+    base = requests.get(
+        url,
+        timeout=15,
+        headers={
+            "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64; rv:151.0) Gecko/20100101 Firefox/151.0"
+            },
+        )
+    if base.status_code//100 !=2:
+        print("Response:",base.content)
+        raise ValueError("Got non-2XX response from ReadAllComics")
+    soup = BeautifulSoup(base.content, "html.parser")
     base.close()
-    soup = BS(base.content, "html.parser")
     pages = soup.select(IMAGE_SELECTOR)
     num_pages = len(pages) - 1
     page_num = 0
-    stored_page_paths = []
+    stored_page_paths:list[str] = []
     for page in pages:
         print(
             make_status_string(Status.DOWNLOADING, 0, name, page_num, num_pages),
@@ -136,14 +146,14 @@ def handle_entry(url: str, name: str) -> None:
                 raise AttributeError("Image can't have more than one source")
             response = requests.get(source, timeout=3)
         fname = f"imgs/{clean_name}/{page_num}.jpg"
-        with open(fname, "wb") as page_file:
+        with Path(fname).open(mode="wb") as page_file:
             page_file.write(response.content)
         stored_page_paths.append(fname)
         page_num += 1
         time.sleep(0.2)  # desparate attempt at trying to not get rate limited >.<
 
     # check whether there are pages that need to be rotated
-    to_rotate_imgs = []
+    to_rotate_imgs:list[int] = []
     images: list[tuple[Image.Image, int]] = []
     for i, path in enumerate(stored_page_paths):
         fname = path
@@ -154,7 +164,7 @@ def handle_entry(url: str, name: str) -> None:
     # if (almost) no images are returned something has to be wrong
     assert len(images) >= 2, (
         "The html structure on the website has probably changed,"
-        + " please open an issue on https://github.com/nighmared/rad"
+         " please open an issue on https://github.com/nighmared/rad"
     )
 
     height_a = images[1][0].height
@@ -171,7 +181,7 @@ def handle_entry(url: str, name: str) -> None:
     while (
         i < len(images)
         and ((wdiff := abs(images[i][0].width - width_a)) < 30 or wdiff > 100)
-        and ((hdiff := abs(images[i][0].height - height_a)) < 50 or hdiff > 200)  #
+        and ((hdiff := abs(images[i][0].height - height_a)) < 50 or hdiff > 200)
     ):
         i += 1
 
@@ -195,9 +205,10 @@ def handle_entry(url: str, name: str) -> None:
             )
             if image.height == banner_height:
                 crop_count += 1
-                image = image.crop((0, 0, image.width, actual_height))
+                image_cropped = image.crop((0, 0, image.width, actual_height))
                 fname = stored_page_paths[indx]
-                image.save(fname)
+                image_cropped.save(fname)
+                image_cropped.close()
             image.close()
         if DEBUG:
             print(f"\nCropped {crop_count} images!".ljust(72))
@@ -216,9 +227,10 @@ def handle_entry(url: str, name: str) -> None:
             )
             if image.width == banner_width:
                 crop_count += 1
-                image = image.crop((0, 0, image.width, image.height - banner_height))
+                image_cropped = image.crop((0, 0, image.width, image.height - banner_height))
                 fname = stored_page_paths[indx]
-                image.save(fname)
+                image_cropped.save(fname)
+                image_cropped.close()
             image.close()
         if DEBUG:
             print(f"\nCropped {crop_count} images!")
