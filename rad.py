@@ -117,7 +117,7 @@ def handle_entry(url: str, name: str) -> None:
     url = url.strip()
     name = name.strip()
     clean_name = name.replace(" ", "_")
-    Path(f"imgs/{clean_name}").mkdir( exist_ok=True)
+    Path(f"imgs/{clean_name}").mkdir(parents=True, exist_ok=True)
     base = requests.get(
         url,
         timeout=15,
